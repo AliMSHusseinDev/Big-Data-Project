@@ -54,11 +54,16 @@ if __name__ == "__main__":
         "Kitchen Stations",
         "Analytics",
         "SLA Alerts",
+        "Simulation Control",
         "Data Pipeline Monitor",
         "End-of-Day Analysis",
     ]:
         app.sidebar.radio[0].set_value(page).run()
-        assert not app.exception, (page, app.exception)
+        assert not app.exception and not app.error, (page, app.exception, app.error)
+        if page in ("Overview", "End-of-Day Analysis"):
+            cards = {metric.label: metric.value for metric in app.metric}
+            assert int(cards["Orders"]) == len(data["Orders"])
+            assert int(cards["Completed items"]) == len(data["OrderItems"])
     press("Start")
     next_day = control_state()
     assert next_day.session_id != session

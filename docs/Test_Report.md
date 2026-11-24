@@ -21,6 +21,10 @@ Linux x86-64 cloud run, 24 November 2026. Docker Engine 29.9.2, Compose 2.40.3. 
 | Windows BAT, Docker Desktop browser launch, SSMS login | One click twice, endpoints verified, inspect real tables | Linux cloud machine only. | Unrun |
 | Student documentation | Six member sections, actual source listings and authentic screenshots | Generated A4 PDF, checked extracted text, member headings and rendered sample pages. NiFi, Kafka UI and Spark screenshots came from the running local services. | Passed |
 
+## Cloud settings retry
+
+On 24 November the saved configuration contained `centralus.data.mcr.microsoft.com`. The running instance reported enforced revision 1 with that host absent. A normal Docker pull and an escalated retry each failed after six attempts with `Forbidden`; the HTTPS proxy also returned 403 for the layer host. SQL initialization, JDBC writes, database-backed dashboard values, controls, historical sessions and full-stack restart remain unverified. The acceptance suite now rejects Streamlit error panels and compares rendered order and completed-item counts with the SQL rows for the completed day.
+
 ## Reproduce the independent checks
 
 From the repository root in Bash, on a Docker host:
