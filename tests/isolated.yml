@@ -1,0 +1,8 @@
+# Compose >=2.24.4. Keep the test stack independent of the demonstration.
+services:
+  kafka: {ports: !reset []}
+  nifi: {ports: !reset []}
+  spark: {ports: !reset []}
+  sql: {ports: !reset []}
+  dashboard: {ports: !reset []}
+  kafka-ui: {ports: !reset []}

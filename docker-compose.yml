@@ -1,0 +1,134 @@
+name: restaurant-kitchen
+x-app: &app
+  image: kitchen-python:1
+  platform: linux/amd64
+  working_dir: /app
+  volumes: [".:/app:ro"]
+  environment:
+    MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?Generate .env first}
+x-check: &check
+  interval: 10s
+  timeout: 8s
+  retries: 36
+  start_period: 20s
+
+services:
+  kafka:
+    image: apache/kafka:3.8.1
+    ports: ["127.0.0.1:9092:9092"]
+    environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:29092,HOST://:9092,CONTROLLER://:29093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes: ["broker:/var/lib/kafka/data"]
+    healthcheck:
+      <<: *check
+      test: ["CMD", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "kafka:29092", "--list"]
+  topics:
+    image: apache/kafka:3.8.1
+    depends_on: {kafka: {condition: service_healthy}}
+    volumes: ["./kafka:/init:ro"]
+    entrypoint: ["/bin/bash", "/init/topics.sh"]
+  nifi:
+    image: apache/nifi:1.28.1
+    ports: ["127.0.0.1:8081:8081"]
+    environment:
+      NIFI_WEB_HTTP_PORT: 8081
+      NIFI_WEB_HTTP_HOST: 0.0.0.0
+      NIFI_JVM_HEAP_INIT: 512m
+      NIFI_JVM_HEAP_MAX: 1g
+    volumes:
+      - nifi-conf:/opt/nifi/nifi-current/conf
+      - nifi-flowfiles:/opt/nifi/nifi-current/flowfile_repository
+      - nifi-content:/opt/nifi/nifi-current/content_repository
+      - ./config:/menu:ro
+    healthcheck:
+      <<: *check
+      test: ["CMD", "curl", "-fsS", "http://localhost:8081/nifi-api/flow/process-groups/root"]
+  flow:
+    image: python:3.11.13-slim-bookworm
+    volumes: ["./nifi:/flow:ro"]
+    environment: {no_proxy: "nifi,localhost,127.0.0.1"}
+    command: ["python", "/flow/deploy.py"]
+    depends_on:
+      topics: {condition: service_completed_successfully}
+      nifi: {condition: service_healthy}
+  sql:
+    image: mcr.microsoft.com/mssql/server:2022-CU18-ubuntu-22.04
+    platform: linux/amd64
+    ports: ["127.0.0.1:1433:1433"]
+    environment:
+      ACCEPT_EULA: Y
+      MSSQL_PID: Developer
+      MSSQL_MEMORY_LIMIT_MB: 2048
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?Generate .env first}
+    volumes: ["sql-data:/var/opt/mssql"]
+    healthcheck:
+      <<: *check
+      test: ["CMD-SHELL", 'SQLCMDPASSWORD="$$MSSQL_SA_PASSWORD" /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -Q "SELECT 1" -b > /dev/null']
+  schema:
+    <<: *app
+    build: .
+    command: ["python", "-m", "database.initialize"]
+    depends_on: {sql: {condition: service_healthy}}
+  spark:
+    image: kitchen-spark:1
+    build: {context: ., dockerfile: spark/Dockerfile}
+    environment:
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?Generate .env first}
+      SPARK_LOCAL_IP: "0.0.0.0"
+    command: ["/opt/spark/bin/spark-submit", "--master", "local[2]", "/app/spark/streaming.py"]
+    ports: ["127.0.0.1:4040:4040"]
+    volumes: [".:/app:ro", "checkpoint:/checkpoints"]
+    depends_on:
+      flow: {condition: service_completed_successfully}
+      schema: {condition: service_completed_successfully}
+    healthcheck:
+      <<: *check
+      test: ["CMD", "python3", "/app/scripts/spark_health.py"]
+    restart: unless-stopped
+  simulator:
+    <<: *app
+    command: ["python", "-m", "simulator.worker"]
+    depends_on:
+      schema: {condition: service_completed_successfully}
+      flow: {condition: service_completed_successfully}
+    healthcheck:
+      <<: *check
+      test: ["CMD", "python", "-m", "simulator.health"]
+    restart: unless-stopped
+  dashboard:
+    <<: *app
+    command: ["streamlit", "run", "dashboard/app.py", "--server.address=0.0.0.0"]
+    ports: ["127.0.0.1:8501:8501"]
+    depends_on:
+      schema: {condition: service_completed_successfully}
+    healthcheck:
+      <<: *check
+      test: ["CMD", "curl", "-fsS", "http://localhost:8501/_stcore/health"]
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    ports: ["127.0.0.1:8085:8080"]
+    environment:
+      KAFKA_CLUSTERS_0_NAME: Kitchen
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      DYNAMIC_CONFIG_ENABLED: "false"
+    depends_on: {kafka: {condition: service_healthy}}
+volumes:
+  broker:
+  nifi-conf:
+  nifi-flowfiles:
+  nifi-content:
+  sql-data:
+  checkpoint:

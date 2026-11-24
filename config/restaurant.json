@@ -1,0 +1,102 @@
+{
+  "arrival_seconds": {
+    "Low Traffic": [
+      40,
+      80
+    ],
+    "Normal Traffic": [
+      20,
+      40
+    ],
+    "Rush Hour": [
+      10,
+      20
+    ],
+    "Kitchen Delay": [
+      20,
+      40
+    ]
+  },
+  "stations": [
+    {
+      "id": "GRILL",
+      "name": "Grill Station",
+      "category": "Burgers",
+      "capacity": 6,
+      "prep_seconds": [
+        180,
+        330
+      ],
+      "sla_seconds": 360,
+      "menu": [
+        "Classic Burger",
+        "Cheese Burger",
+        "Chicken Burger"
+      ]
+    },
+    {
+      "id": "PIZZA",
+      "name": "Pizza Station",
+      "category": "Pizza",
+      "capacity": 8,
+      "prep_seconds": [
+        270,
+        450
+      ],
+      "sla_seconds": 480,
+      "menu": [
+        "Margherita",
+        "Pepperoni",
+        "Chicken Pizza"
+      ]
+    },
+    {
+      "id": "FRYER",
+      "name": "Fryer Station",
+      "category": "Fried Food",
+      "capacity": 4,
+      "prep_seconds": [
+        100,
+        210
+      ],
+      "sla_seconds": 240,
+      "menu": [
+        "French Fries",
+        "Chicken Nuggets",
+        "Onion Rings"
+      ]
+    },
+    {
+      "id": "SALAD",
+      "name": "Salad Station",
+      "category": "Salads",
+      "capacity": 3,
+      "prep_seconds": [
+        60,
+        150
+      ],
+      "sla_seconds": 180,
+      "menu": [
+        "Caesar Salad",
+        "Green Salad",
+        "Greek Salad"
+      ]
+    },
+    {
+      "id": "DRINKS",
+      "name": "Drinks Station",
+      "category": "Drinks",
+      "capacity": 2,
+      "prep_seconds": [
+        20,
+        65
+      ],
+      "sla_seconds": 75,
+      "menu": [
+        "Cola",
+        "Juice",
+        "Water"
+      ]
+    }
+  ]
+}

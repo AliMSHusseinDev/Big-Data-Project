@@ -1,0 +1,28 @@
+{
+  "raw": {
+    "session_id": "5a07d3c7-4239-4e77-9e0d-9299ea121a1b",
+    "order_id": "5a07d3c7-4239-4e77-9e0d-9299ea121a1b-O",
+    "order_size": 1,
+    "item_id": "5a07d3c7-4239-4e77-9e0d-9299ea121a1b-I",
+    "item_name": " cola ",
+    "category": " drinks ",
+    "station_id": " drinks ",
+    "sla_seconds": "75",
+    "event_id": "5a07d3c7-4239-4e77-9e0d-9299ea121a1bready",
+    "event_type": "ready",
+    "event_time": "2026-01-01T12:03:00+00:00"
+  },
+  "cleaned": {
+    "event_id": "5a07d3c7-4239-4e77-9e0d-9299ea121a1bready",
+    "session_id": "5a07d3c7-4239-4e77-9e0d-9299ea121a1b",
+    "event_time": "2026-01-01T12:03:00Z",
+    "event_type": "READY",
+    "station_id": "DRINKS",
+    "category": "Drinks",
+    "item_name": "Cola",
+    "sla_seconds": 75,
+    "order_id": "5a07d3c7-4239-4e77-9e0d-9299ea121a1b-O",
+    "item_id": "5a07d3c7-4239-4e77-9e0d-9299ea121a1b-I",
+    "order_size": 1
+  }
+}

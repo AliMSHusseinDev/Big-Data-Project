@@ -1,0 +1,4 @@
+**
+!requirements.txt
+!spark/
+!spark/download_jars.py

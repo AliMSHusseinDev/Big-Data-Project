@@ -1,0 +1,23 @@
+@page { size: A4; margin: 17mm 16mm 19mm;
+  @bottom-left {content:"KITCHEN MONITOR   /   ENGINEERING HANDBOOK"; font:8pt sans-serif; color:#607571}
+  @bottom-right {content:counter(page); font:9pt sans-serif; color:#235949} }
+@page:first { @bottom-left {content:none} @bottom-right {content:none} }
+* {box-sizing:border-box}
+body { font:10.4pt/1.46 "DejaVu Sans",sans-serif; color:#213630; margin:0 }
+.cover {break-after:page; padding:35mm 8mm 10mm; border-top:10mm solid #236654}
+.cover p:first-child,.listing {font-weight:bold;letter-spacing:.04em;color:#25604e}
+.cover h1 {font-size:36pt;line-height:1.12;max-width:145mm;margin:16mm 0 9mm}
+.cover hr {border:1px solid #d4ddd6; margin:22mm 0 8mm}
+h1 {font-size:25pt; line-height:1.2; break-before:page; color:#174e43}
+.cover h1 {break-before:auto}
+h2 {font-size:15pt; margin-top:7mm;color:#245c52} h3 {font-size:11.7pt}
+h1,h2,h3,.listing {break-after:avoid} p {orphans:3;widows:3}
+table {border-collapse:collapse;width:100%;font-size:9pt}
+th,td {border-bottom:1px solid #cedbd6; padding:4px 6px;text-align:left}
+th {background:#e4eee9} tr {break-inside:avoid}
+.listing {font:9pt "DejaVu Sans Mono",monospace;margin:6mm 0 1mm}
+pre {white-space:pre-wrap;overflow-wrap:anywhere;background:#f0f4f1;border-left:2px solid #4c8c73;padding:2mm 3mm;font:8pt/1.35 "DejaVu Sans Mono",monospace}
+code {font-family:"DejaVu Sans Mono",monospace;font-size:.92em}
+pre code {font-size:inherit} img {max-width:100%;max-height:185mm;object-fit:contain}
+figure {margin:5mm 0;break-inside:avoid} figcaption {font-size:9pt;color:#4e655e}
+a {color:#1f604e}

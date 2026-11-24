@@ -1,0 +1,9 @@
+digraph ERD {
+ graph [rankdir=TB,bgcolor="transparent",nodesep=.22,ranksep=.45];
+ node [shape=box,style="rounded,filled",fillcolor="#e8f1f4",color="#537681",fontname="Helvetica",fontsize=10];
+ edge [color="#537681",arrowsize=.6];
+ SimulationSessions -> {SimulationControl ProcessedEvents Orders OrderItems SLAAlerts StationMetrics CategoryMetrics MetricHistory};
+ Orders -> OrderItems; OrderItems -> SLAAlerts;
+ {rank=same; SimulationControl; ProcessedEvents; Orders}
+ {rank=same; StationMetrics; CategoryMetrics; MetricHistory}
+}

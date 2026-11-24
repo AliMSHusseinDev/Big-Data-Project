@@ -1,0 +1,13 @@
+digraph Kitchen {
+ graph [rankdir=TB,bgcolor="transparent",nodesep=0.35,ranksep=0.35];
+ node [shape=box,style="rounded,filled",fillcolor="#e7f4ed",color="#39705f",fontname="Helvetica",fontsize=12,margin="0.15,0.08"];
+ edge [color="#487266",fontname="Helvetica",fontsize=10];
+ simulator [label="Python simulator\nvirtual clock + station queues"];
+ raw [label="Kafka  •  kitchen.raw"]; nifi [label="NiFi\nnormalize + validate"];
+ clean [label="Kafka  •  kitchen.cleaned"]; bad [label="Kafka  •  kitchen.invalid",fillcolor="#fce8d8"];
+ spark [label="Spark Structured Streaming\nitem state + metrics + alerts"];
+ sql [label="SQL Server  •  RestaurantDB"]; ui [label="Streamlit + Plotly"];
+ simulator -> raw -> nifi -> clean -> spark -> sql -> ui;
+ nifi -> bad [label=" rejected"];
+ {rank=same;clean;bad}
+}
