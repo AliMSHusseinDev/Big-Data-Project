@@ -21,6 +21,18 @@ A five-station restaurant streams item lifecycle events through **Kafka → NiFi
 
 All published ports bind to loopback. The Compose network is for local teaching. SQL Server uses the Developer edition. NiFi's canvas uses local HTTP. Spark runs a two-thread local driver with its own application UI.
 
+## Course lab and existing installations
+
+The project uses Kafka 4.3.2 (Scala 2.13) in KRaft mode and NiFi 2.12.0. The handbook covers the Week 9 Kafka questions in Member 2, the Week 10 NiFi questions in Member 3, and the Spark transformations in Member 4.
+
+The [sample dataset](dataset/) contains two chronological JSONL files from the same restaurant simulator used live. Run `python -m dataset.generate` to regenerate them with the fixed seed. After building the images, run the command below from the project root to read both files, print Spark's physical plan and count completed items by category.
+
+```sh
+docker compose run --rm --no-deps spark /opt/spark/bin/spark-submit --master local[2] /app/dataset/analyze.py
+```
+
+**Updating from Kafka 3.8.1 / NiFi 1.28.1.** On the old version, end the day, wait for Completed, and confirm all NiFi connections have zero queued FlowFiles and kitchen-etl has caught up with kitchen.raw. Stop the stack and back up the local .env and volumes before updating. This version reuses the Kafka log, SQL database and Spark checkpoint. It initializes separate NiFi 2 configuration, FlowFile and content volumes because the processor types and properties changed between major versions. Keep the old NiFi volumes for recovery. Start_Project.bat will pull the two updated images. Do not downgrade an upgraded Kafka log in place.
+
 ## Linux or cloud
 
 From the checkout, with Python 3 and Docker Compose installed:
@@ -33,7 +45,7 @@ docker compose up -d --wait --wait-timeout 600
 docker compose exec -T dashboard python -m scripts.readiness
 ```
 
-Managed builders with an organization-specific TLS trust bundle can run the two `docker build` commands in [the test report](docs/Test_Report.md) before `docker compose up`. Allow the Microsoft Container Registry layer host returned by the SQL image pull. On Linux the Spark UID needs read and traversal access to `spark/`, `scripts/`, and `tests/`. NiFi needs read access to `config/`.
+Managed builders with an organization-specific TLS trust bundle can run the two `docker build` commands in [the test report](docs/Test_Report.md) before `docker compose up`. Allow the Microsoft Container Registry layer host returned by the SQL image pull. On Linux the Spark UID needs read and traversal access to the checkout and the Python modules it loads, including `dataset/` for the course exercise. NiFi needs read access to `config/` and `nifi/start-local.sh`.
 
 ## Live demonstration
 

@@ -14,7 +14,7 @@ x-check: &check
 
 services:
   kafka:
-    image: apache/kafka:3.8.1
+    image: apache/kafka:4.3.2
     ports: ["127.0.0.1:9092:9092"]
     environment:
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
@@ -30,28 +30,26 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_RETENTION_HOURS: 168
       KAFKA_LOG_DIRS: /var/lib/kafka/data
     volumes: ["broker:/var/lib/kafka/data"]
     healthcheck:
       <<: *check
       test: ["CMD", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "kafka:29092", "--list"]
   topics:
-    image: apache/kafka:3.8.1
+    image: apache/kafka:4.3.2
     depends_on: {kafka: {condition: service_healthy}}
     volumes: ["./kafka:/init:ro"]
     entrypoint: ["/bin/bash", "/init/topics.sh"]
   nifi:
-    image: apache/nifi:1.28.1
+    image: apache/nifi:2.12.0
     ports: ["127.0.0.1:8081:8081"]
-    environment:
-      NIFI_WEB_HTTP_PORT: 8081
-      NIFI_WEB_HTTP_HOST: 0.0.0.0
-      NIFI_JVM_HEAP_INIT: 512m
-      NIFI_JVM_HEAP_MAX: 1g
+    entrypoint: ["/bin/sh", "/init/start-local.sh"]
     volumes:
-      - nifi-conf:/opt/nifi/nifi-current/conf
-      - nifi-flowfiles:/opt/nifi/nifi-current/flowfile_repository
-      - nifi-content:/opt/nifi/nifi-current/content_repository
+      - ./nifi/start-local.sh:/init/start-local.sh:ro
+      - nifi2-conf:/opt/nifi/nifi-current/conf
+      - nifi2-flowfiles:/opt/nifi/nifi-current/flowfile_repository
+      - nifi2-content:/opt/nifi/nifi-current/content_repository
       - ./config:/menu:ro
     healthcheck:
       <<: *check
@@ -127,8 +125,8 @@ services:
     depends_on: {kafka: {condition: service_healthy}}
 volumes:
   broker:
-  nifi-conf:
-  nifi-flowfiles:
-  nifi-content:
+  nifi2-conf:
+  nifi2-flowfiles:
+  nifi2-content:
   sql-data:
   checkpoint:

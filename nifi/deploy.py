@@ -1,4 +1,4 @@
-"""Build the visible flow using NiFi 1.28's revision-aware REST API."""
+"""Build the visible flow using NiFi 2.12's revision-aware REST API."""
 
 import json
 import os
@@ -46,10 +46,19 @@ def deploy():
     for name, implementation, props in [
         (
             "Kitchen JSON reader",
-            "JsonTreeReader",
-            {"schema-access-strategy": "schema-text-property", "schema-text": json.dumps(schema)},
+            "org.apache.nifi.json.JsonTreeReader",
+            {"Schema Access Strategy": "schema-text-property", "Schema Text": json.dumps(schema)},
         ),
-        ("Kitchen JSON writer", "JsonRecordSetWriter", {"output-grouping": "output-oneline"}),
+        (
+            "Kitchen broker",
+            "org.apache.nifi.kafka.service.Kafka3ConnectionService",
+            {"bootstrap.servers": "kafka:29092", "security.protocol": "PLAINTEXT"},
+        ),
+        (
+            "Kitchen JSON writer",
+            "org.apache.nifi.json.JsonRecordSetWriter",
+            {"Output Grouping": "output-oneline"},
+        ),
     ]:
         if name not in services:
             services[name] = api(
@@ -57,7 +66,7 @@ def deploy():
                 {
                     "revision": NEW,
                     "component": {
-                        "type": "org.apache.nifi.json." + implementation,
+                        "type": implementation,
                         "name": name,
                         "properties": props,
                     },
@@ -91,29 +100,31 @@ def deploy():
         else:
             raise RuntimeError(name + " did not enable")
 
-    kafka = {"bootstrap.servers": "kafka:29092", "security.protocol": "PLAINTEXT"}
-    publish = dict(kafka, **{"acks": "all", "use-transactions": "false", "kafka-key": "${message.key}"})
-    prefix = "org.apache.nifi.processors."
+    kafka = {"Kafka Connection Service": services["Kitchen broker"]["id"]}
+    publish = dict(
+        kafka, **{"acks": "all", "Transactions Enabled": "false", "Kafka Key": "${message.key}"}
+    )
     definitions = [
         (
             "Read raw orders",
-            "kafka.pubsub.ConsumeKafka_2_6",
+            "org.apache.nifi.kafka.processors.ConsumeKafka",
             0,
             0,
             dict(
                 kafka,
-                topic="kitchen.raw",
+                Topics="kitchen.raw",
                 **{
-                    "group.id": "kitchen-etl",
+                    "Group ID": "kitchen-etl",
                     "auto.offset.reset": "earliest",
-                    "key-attribute-encoding": "utf-8",
+                    "Processing Strategy": "FLOW_FILE",
+                    "Key Attribute Encoding": "utf-8",
                 },
             ),
             [],
         ),
         (
             "Normalize and check menu",
-            "script.ExecuteScript",
+            "org.apache.nifi.processors.script.ExecuteScript",
             0,
             250,
             {"Script Engine": "Groovy", "Script Body": (ROOT / "clean.groovy").read_text()},
@@ -121,30 +132,36 @@ def deploy():
         ),
         (
             "Validate event schema",
-            "standard.ValidateRecord",
+            "org.apache.nifi.processors.standard.ValidateRecord",
             0,
             500,
             {
-                "record-reader": services["Kitchen JSON reader"]["id"],
-                "record-writer": services["Kitchen JSON writer"]["id"],
-                "schema-access-strategy": "reader-schema",
+                "Record Reader": services["Kitchen JSON reader"]["id"],
+                "Record Writer": services["Kitchen JSON writer"]["id"],
+                "Schema Access Strategy": "reader-schema",
             },
             [],
         ),
         (
             "Publish cleaned",
-            "kafka.pubsub.PublishKafka_2_6",
+            "org.apache.nifi.kafka.processors.PublishKafka",
             0,
             800,
-            dict(publish, topic="kitchen.cleaned"),
+            dict(publish, **{"Topic Name": "kitchen.cleaned"}),
             ["success"],
         ),
         (
             "Publish rejected",
-            "kafka.pubsub.PublishKafka_2_6",
+            "org.apache.nifi.kafka.processors.PublishKafka",
             700,
             500,
-            dict(publish, topic="kitchen.invalid", **{"attribute-name-regex": "record.error.message"}),
+            dict(
+                publish,
+                **{
+                    "Topic Name": "kitchen.invalid",
+                    "FlowFile Attribute Header Pattern": "record.error.message",
+                },
+            ),
             ["success"],
         ),
     ]
@@ -157,7 +174,7 @@ def deploy():
                     "revision": NEW,
                     "component": {
                         "name": name,
-                        "type": prefix + kind,
+                        "type": kind,
                         "position": {"x": x, "y": y},
                         "config": {
                             "properties": props,
@@ -217,6 +234,8 @@ def deploy():
             "source": {"id": nodes[source], "type": "PROCESSOR", "groupId": group},
             "destination": {"id": nodes[dest], "type": "PROCESSOR", "groupId": group},
             "selectedRelationships": rels,
+            "backPressureObjectThreshold": 1000,
+            "backPressureDataSizeThreshold": "10 MB",
         }
         if source == dest:
             x, y = definitions[source][2:4]
@@ -235,7 +254,7 @@ def deploy():
             api(endpoint + "/run-status", {"revision": entity["revision"], "state": "RUNNING"}, "PUT")
     if any(api("processors/" + node)["component"]["state"] != "RUNNING" for node in nodes):
         raise RuntimeError("Flow did not start")
-    print(f"Running: {len(nodes)} processors, 2 controller services")
+    print(f"Running: {len(nodes)} processors, 3 controller services")
 
 
 if __name__ == "__main__":

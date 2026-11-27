@@ -34,6 +34,15 @@ if __name__ == "__main__":
         p["component"]["state"] == "RUNNING" and p["component"]["validationStatus"] == "VALID"
         for p in processors
     )
+    service_list = json.load(
+        http.open("http://nifi:8081/nifi-api/flow/process-groups/root/controller-services", timeout=8)
+    )
+    enabled = {
+        entry["component"]["name"]
+        for entry in service_list["controllerServices"]
+        if entry["component"]["state"] == "ENABLED"
+    }
+    assert {"Kitchen broker", "Kitchen JSON reader", "Kitchen JSON writer"} <= enabled
     assert (
         json.load(http.open("http://spark:4040/api/v1/applications", timeout=5))[0]["name"]
         == "Kitchen order monitoring"

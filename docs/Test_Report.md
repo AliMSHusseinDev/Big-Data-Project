@@ -1,6 +1,24 @@
 # Verification report
 
-Linux x86-64 cloud run, 24 November 2026. Docker Engine 29.9.2, Compose 2.40.3. The tested transport stack used real services in an isolated Compose project. The Windows launcher and the SQL-backed pipeline still require target-host acceptance.
+## Course requirements checked on 27 November 2026
+
+| Requirement | Evidence from the upgraded Linux stack |
+|---|---|
+| Kafka concepts, architecture and uses | Handbook Member 2 traces producers, broker, controller, topics, partitions, keys, values, offsets and consumer groups through the kitchen system. It also compares ZooKeeper coordination with KRaft. |
+| Kafka 2.13–4.3.2 and KRaft | The broker contained kafka_2.13-4.3.2.jar. The metadata quorum reported leader ID 1 and one voter on the controller listener. |
+| Replication and retention | The topic description reported one leader, one replica and ISR 1. The effective raw topic configuration reported delete cleanup and retention.ms=604800000. Multi-broker replication and week-long expiration were not exercised. |
+| Dataset and split | Two consecutive simulator-generated JSONL files contain 48 and 109 unique events. A seeded regeneration produced the same dataset. In the live test, both parts went through kitchen.raw, NiFi, and kitchen.cleaned. Spark Structured Streaming recovered all 157 distinct event IDs and reported eight completed customer orders and 17 ready items: six burgers, four drinks, three pizzas, two salads and two fried-food items. |
+| Narrow and wide Spark transformations | The Spark physical plan for the two files showed Filter and Project followed by Exchange and aggregation. Spark counted 17 ready items across five categories. The production item-state and category functions also apply these transformations across event history. Three simulator tests and two Spark analytics tests passed. |
+| NiFi 2.12.0 architecture and Kafka integration | The running NiFi API reported version 2.12.0. Five processors validated and ran. Repeated deployment reused the root group and its components. NiFi normalized four lifecycle messages plus two clock/final messages and rejected malformed JSON. |
+| Controller Services, attributes and content | Kafka3ConnectionService, JsonTreeReader and JsonRecordSetWriter were enabled. The wire test verified canonical content, a numeric SLA and a Kafka key matching the FlowFile's message.key for item and control events. Member 3 explains NiFi versus traditional batch ETL and the record/FlowFile distinction. |
+| Connections and back pressure | All seven connections reported 1,000 FlowFiles and 10 MB. In the isolated lab, the raw connection threshold was temporarily lowered to three and normalization paused. The queue stayed at three while 154 additional records were published upstream. After restoring the threshold and resuming the processor, all 157 expected dataset IDs and keys arrived on kitchen.cleaned. |
+| Upgrade and recovery | Kafka 4.3.2 opened a **copy** of a populated 3.8.1 broker volume and reported cleaned end offset 10. The updated broker and NiFi restarted in the dedicated test project. Spark consumed the upgraded broker with the existing Spark 3.5.5 connector and reopened its test checkpoint without duplicate output. |
+
+The SQL-backed sink, full dashboard results and Windows launcher retain the unrun status recorded below. These course checks exercised the Kafka, NiFi and Spark stages.
+
+## Earlier baseline
+
+Linux x86-64 cloud run, 24 November 2026, with Kafka 3.8.1 and NiFi 1.28.1. Docker Engine 29.9.2, Compose 2.40.3. The tested transport stack used real services in an isolated Compose project. The Windows launcher and the SQL-backed pipeline still require target-host acceptance.
 
 | Check | Expected | Observed | Status |
 |---|---|---|---|

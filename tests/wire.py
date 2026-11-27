@@ -60,9 +60,14 @@ if __name__ == "__main__":
     deadline = time.monotonic() + 100
     while time.monotonic() < deadline:
         for partition, records in consumer.poll(timeout_ms=500).items():
-            results[partition.topic.split(".")[1]].extend(
-                json.loads(r.value) for r in records if session.encode() in r.value
-            )
+            for message in records:
+                if session.encode() not in message.value:
+                    continue
+                record = json.loads(message.value)
+                if partition.topic == "kitchen.cleaned":
+                    # The publisher takes the Kafka key from NiFi's message.key attribute.
+                    assert message.key.decode() == (record.get("item_id") or session)
+                results[partition.topic.split(".")[1]].append(record)
         if len(results["cleaned"]) >= 6 and results["invalid"]:
             break
     producer.close()

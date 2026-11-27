@@ -28,8 +28,8 @@ SQL carries **commands** in the reverse direction: the browser updates one contr
 | Component | Runtime and connection |
 |---|---|
 | Python services | Python 3.11.13, kafka-python 2.2.15, pyodbc 5.2.0, ODBC Driver 18.5.1.1 |
-| Kafka | Apache Kafka 3.8.1, KRaft broker/controller, internal port 29092 |
-| NiFi | Apache NiFi 1.28.1, packaged Kafka 2.6 client processors, JSON record services, Groovy |
+| Kafka | Apache Kafka 4.3.2 (Scala 2.13), KRaft broker/controller, internal port 29092 |
+| NiFi | Apache NiFi 2.12.0, ConsumeKafka and PublishKafka with a shared Kafka connection service, JSON record services, Groovy |
 | Spark | 3.5.5, Scala 2.12, Java 17, Python supplied by Apache Spark image |
 | Spark connectors | Matching Spark Kafka modules 3.5.5, Kafka client 3.4.1, Microsoft JDBC 12.8.1.jre11 for Java 11+ |
 | Storage | SQL Server 2022 CU18 Developer, TCP 1433, encrypted client connections trusting local server certificate |
@@ -90,6 +90,16 @@ Kafka is a durable ordered log. The broker appends bytes to a partition and assi
 
 The Kafka section of the Compose listing in Member 6 defines INTERNAL, HOST and CONTROLLER listeners. One node runs the controller and broker; internal topics have replication factor one. The shared cluster ID and broker volume keep log identity stable across restarts. A single node cannot tolerate disk loss. The UI uses the internal broker address.
 
+## Week 9 discussion lab
+
+Kafka decouples fast producers from independent consumers that can pause and replay. A kitchen order log, a clickstream and equipment telemetry all fit that pattern. A Kafka record has a key, a value and a timestamp; the broker assigns its partition offset. Optional headers carry metadata. Here the key identifies an item (or a session for clock events), while the JSON value describes a state transition.
+
+**ZooKeeper and KRaft.** Older Kafka deployments used an external ZooKeeper ensemble to coordinate cluster metadata. In KRaft the Kafka controllers replicate a metadata log using Raft. Their elected leader manages metadata such as partition leadership. In this one-node lab broker and controller share node 1. Inspect its leader ID and voter list with `docker compose exec kafka /opt/kafka/bin/kafka-metadata-quorum.sh --bootstrap-server kafka:29092 describe --status`. The broker JAR is kafka_2.13-4.3.2. The Spark connector uses Scala 2.12 inside the Spark JVM; those Scala versions apply to different processes.
+
+**Replication.** Each partition has a leader. With multiple replicas, followers copy its log and in-sync replicas participate in acknowledgments. Run `docker compose exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --describe --topic kitchen.raw`. Leader, Replicas and ISR identify the same broker here. Replication factor one means one copy and no broker failover. A Docker volume preserves records across restart on the same machine.
+
+**Message retention.** The broker sets log retention to 168 hours. With delete cleanup, eligible closed log segments are removed during periodic cleanup. Consuming a message does not delete it. Inspect the effective topic settings with `docker compose exec kafka /opt/kafka/bin/kafka-configs.sh --bootstrap-server kafka:29092 --describe --all --entity-type topics --entity-name kitchen.raw`. Look for cleanup.policy=delete and retention.ms=604800000.
+
 ## Creation, production and inspection
 
 The initialization shell iterates over exactly three topic names, requests one partition and skips existing topics. It runs after a successful broker metadata request. Inside the worker's **run** function in Member 1, JSON serialization produces UTF-8 bytes, key serialization encodes the string, and `acks="all"` waits for the in-sync replicas. The send future raises on failure. The consumer in Member 6 reads bounded samples without committing group offsets.
@@ -115,19 +125,31 @@ From the checkout, `docker compose exec kafka /opt/kafka/bin/kafka-topics.sh --b
 
 # Member 3 · NiFi ETL {#member-3}
 
-A FlowFile has content bytes and attributes. Connections queue FlowFiles and apply backpressure. Each processor routes a FlowFile along a named relationship. Open the canvas on port 8081 and use Fit in the Navigate panel. Open a processor's configuration to inspect Settings, Scheduling, Properties and Relationships. The root process group's Controller Services tab shows the two reusable JSON services.
+A FlowFile has content bytes and attributes. Connections queue FlowFiles and apply backpressure. Each processor routes a FlowFile along a named relationship. Open the canvas on port 8081 and use Fit in the Navigate panel. Open a processor's configuration to inspect Settings, Scheduling, Properties and Relationships. The root process group's Controller Services tab shows the shared broker connection and two reusable JSON services.
 
 ![Actual running NiFi canvas. The right-hand path retains rejected inputs.](images/nifi.png)
 
 | Processor | Input and properties | Output and route |
 |---|---|---|
-| Read raw orders | ConsumeKafka_2_6, kafka:29092, kitchen.raw, group kitchen-etl, earliest on first use, UTF-8 keys | One message per FlowFile to normalization on success |
+| Read raw orders | ConsumeKafka, kafka:29092, kitchen.raw, group kitchen-etl, earliest on first use, UTF-8 keys | One message per FlowFile to normalization on success |
 | Normalize and check menu | ExecuteScript with Groovy. Reads raw text, checks required fields, canonicalizes menu, time and numeric types | Success to Validate event schema. Failure wraps original content and reason for Publish rejected |
 | Validate event schema | ValidateRecord with Kitchen JSON reader, Kitchen JSON writer and reader schema | Valid to Publish cleaned. Invalid or reader/writer failure to Publish rejected |
-| Publish cleaned | PublishKafka_2_6, kitchen.cleaned, message.key, replicated acknowledgments | Success terminates. Failure loops back for retry |
+| Publish cleaned | PublishKafka, kitchen.cleaned, message.key, replicated acknowledgments | Success terminates. Failure loops back for retry |
 | Publish rejected | Same publisher settings, kitchen.invalid, optional record error header | Success terminates. Failure loops back for retry |
 
 The record reader applies an Avro record schema to the JSON. Four fields are required strings; lifecycle fields are nullable for CLOCK and FINAL. The script enforces the stricter item rules before the reader runs. The writer emits one JSON object per line. No external cleaning process consumes raw orders.
+
+## Week 10 discussion lab
+
+**Architecture and traditional ETL.** A traditional scheduled batch job extracts a bounded dataset, transforms it, and loads results at intervals. This NiFi flow runs continuously. Its processors exchange FlowFiles through persistent queues. The content repository stores bytes; the FlowFile repository tracks queue state and content references. Provenance records trace processing history. The project uses the root process group; nested groups are optional organizational containers.
+
+**Kafka record versus FlowFile.** A Kafka record lives at an offset in a topic partition. A FlowFile is NiFi's unit of work, with string attributes and a reference to content. ConsumeKafka's FLOW_FILE strategy creates one FlowFile per Kafka message. Other strategies can batch several messages together. Kafka and NiFi have independent metadata and delivery semantics.
+
+**Which processor edits what?** In Normalize and check menu, ExecuteScript calls session.write to replace the content with canonical JSON, and session.putAttribute to set the message.key attribute. For example, a raw drink has a lowercase station and a string SLA; the cleaned JSON carries DRINKS and an integer. PublishKafka reads the attribute through NiFi Expression Language and uses it as the outgoing Kafka record key. An UpdateAttribute processor can change attributes in another design; the deployed flow uses ExecuteScript for both edits.
+
+**What is a Controller Service?** It is a configured capability that processors reference and reuse. It does not move a FlowFile by itself. Kitchen broker (Kafka3ConnectionService) supplies the broker address and protocol to all three Kafka processors. Kitchen JSON reader (JsonTreeReader) parses content using the configured Avro schema. Kitchen JSON writer (JsonRecordSetWriter) serializes validated records for output. Open the root group's Controller Services tab and trace the references back to the processors.
+
+**Back pressure.** Open a connection's configuration and inspect Settings. Each connection has thresholds of 1,000 queued FlowFiles and 10 MB of queued content. Reaching either threshold makes NiFi hold back new upstream scheduling until the downstream processor drains the queue. In-flight work can overshoot a threshold. In an isolated lab run we temporarily set the count threshold to three and stopped the downstream normalizer. Three records filled the queue. While 154 more waited upstream, the queue stayed at three. Restoring the limit and starting normalization delivered all 157 records. Inspect connection queue size and consumer lag separately when explaining the result.
 
 ## Normalization walk-through
 
@@ -147,6 +169,10 @@ The Groovy callback receives input and output streams for one FlowFile. **field*
 
 {{source nifi/deploy.py}}
 
+The local NiFi launcher configures HTTP on the loopback-published Compose port and sets the JVM heap before starting the service.
+
+{{source nifi/start-local.sh}}
+
 ## Discussion
 
 - **Why use both Groovy and ValidateRecord?** Groovy checks the domain rules and transforms the bytes; ValidateRecord applies the structural schema and writes the clean JSON.
@@ -163,6 +189,18 @@ The Groovy callback receives input and output streams for one FlowFile. **field*
 The production application runs one Structured Streaming query. Its Kafka source subscribes to kitchen.cleaned. Each trigger passes a bounded DataFrame to foreachBatch. Event history in SQL is the state across batches; Spark's checkpoint records stream progress. A micro-batch containing a READY event can therefore use a PREPARING event from an earlier batch.
 
 ![Actual Spark application UI during the Kafka streaming integration test.](images/spark.png)
+
+## Split dataset and narrow versus wide transformations
+
+The primary source continuously generates orders. The repository also includes a reproducible raw dataset from that simulator. With seed 42 and a fixed UTC opening, dataset/generate.py records four simulated minutes of arrivals and drains the kitchen. The first file contains the first two minutes inclusive, the second contains subsequent activity through FINAL. Read part-1.jsonl then part-2.jsonl for event order. These chronological chunks can split an item's lifecycle between files. They contain 48 and 109 unique events respectively, covering eight orders and 17 items. No model is trained and no train/test split is assumed.
+
+In the live Spark job, select/from_json, where and row-wise withColumn are **narrow** transformations. Each output row uses data from its own input partition. groupBy followed by agg for category averages and station counts is **wide** when groups span partitions. Spark shuffles partial results by grouping key before final aggregation. A Kafka partition, a dataset file, and a Spark execution partition have different roles.
+
+For a short classroom demonstration, run `docker compose run --rm --no-deps spark /opt/spark/bin/spark-submit --master local[2] /app/dataset/analyze.py` in the checkout after building the Spark image. Find Filter and Project in the printed physical plan, followed by Exchange (hash partitioning) for the wide aggregation. The two files together yield Burgers 6, Drinks 4, Pizza 3, Fried Food 2 and Salads 2. The live job continues to consume kitchen.cleaned.
+
+{{source dataset/generate.py}}
+
+{{source dataset/analyze.py}}
 
 ## Transformations to explain at the board
 
