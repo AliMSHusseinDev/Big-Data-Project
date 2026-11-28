@@ -1,10 +1,43 @@
 import json
+from datetime import datetime
 import random
 import unittest
 from simulator.kitchen import advance, empty_day, STATIONS
 
 
 class SimulationTests(unittest.TestCase):
+    def test_sla_balance_across_business_days(self):
+        rates = []
+        for mode in ("Low Traffic", "Normal Traffic", "Rush Hour", "Kitchen Delay"):
+            items = late = late_orders = 0
+            for seed in range(20):
+                rng = random.Random(seed)
+                day = empty_day(0)
+                events = []
+                for _ in range(128):
+                    elapsed = day["next_order"] - day["now"]
+                    events.extend(advance(day, "s", "Running", elapsed, 1, mode, 1, rng))
+                events.extend(advance(day, "s", "Closing", 86400, 1, mode, 1, rng))
+                self.assertTrue(day["finished"])
+                starts, affected = {}, set()
+                for e in events:
+                    if e["event_type"] == "preparing":
+                        starts[e["item_id"]] = datetime.fromisoformat(e["event_time"])
+                    if e["event_type"] == "ready":
+                        duration = datetime.fromisoformat(e["event_time"]) - starts[e["item_id"]]
+                        items += 1
+                        if duration.total_seconds() > int(e["sla_seconds"]):
+                            late += 1
+                            affected.add(e["order_id"])
+                late_orders += len(affected)
+            rate = late / items
+            rates.append(rate)
+            print(f"{mode}: {late}/{items} items and {late_orders}/2560 orders with a breach")
+            self.assertGreater(rate, 0)
+            self.assertLess(late_orders, 1280)
+        self.assertEqual(rates, sorted(rates))
+        self.assertTrue(0.03 < rates[1] < 0.09)
+
     def test_speeds_and_pause(self):
         for speed in (1, 2, 5, 10):
             day = empty_day(0)

@@ -50,11 +50,12 @@ Managed builders with an organization-specific TLS trust bundle can run the two 
 ## Live demonstration
 
 1. Start the stack. Show the verified endpoint summary, idle kitchen and empty current-day state. Start a day and watch a single order split into individual items.
-2. Open Kafka UI → Kitchen → Topics → kitchen.raw → Messages. Copy an event ID. Open the NiFi canvas and follow **Read raw orders → Normalize and check menu → Validate event schema → Publish cleaned**. Inspect that ID in kitchen.cleaned, or use the matched pair in Data Pipeline Monitor. Send an invalid demo record from Simulation Control and inspect kitchen.invalid.
+2. Open Kafka UI → Kitchen → Topics → kitchen.raw → Messages. Copy an event ID. Open the NiFi canvas and follow **Read raw orders → Normalize and check menu → Validate event schema → Publish cleaned**. Inspect that ID in kitchen.cleaned, or use the matched pair in Data Pipeline Monitor. Each new day sends one separate record with event type `BROKEN`. Inspect the original and the rejection reason in kitchen.invalid. Simulation Control can send another example.
 3. Open the Spark UI's Structured Streaming tab. Inspect the Kafka source, trigger progress and jobs. In SSMS connect to RestaurantDB, expand Tables, and run the inspection queries in the handbook. Compare the stored items with the dashboard.
-4. Select **10×**, **Rush Hour**, then **Apply settings**. Watch queues build. Switch to **Kitchen Delay**. New grill and drink preparations take longer. Inspect active alerts before pickup, then resolved alerts afterward.
+4. Use **Normal Traffic** at **5×** to watch ordinary service. A small share of items need a second preparation. Use **Rush Hour** for busier queues or **Kitchen Delay** for more remakes, then press **Apply settings**. On **SLA Alerts**, compare actual prep seconds with the limit. Overview shows total, active and resolved violations and the share of orders with a late item. Once the day is Completed, every late item is resolved.
 5. Pause and record the simulated time. Wait, refresh, then resume the same day. Press End. Watch Closing drain the backlog. On Completed, open End-of-Day Analysis and compare category preparation, observed peaks and busiest station.
-6. Start a new day. Select the old day in Analytics or End-of-Day Analysis to show its preserved rows.
+6. In **Data Pipeline Monitor**, choose the business date and press **Compare retained messages for this day** after NiFi drains. In a clean run, raw equals cleaned plus invalid. The check compares individual records, counts repeated copies and lists differences. Both publishers attach the partition-0 raw offset in the `kafka.offset` header. Older records can still be matched by event ID. Kafka UI topic totals span business days and can change while you read them.
+7. Start a new day. Select the old date in Analytics or End-of-Day Analysis to see its saved results.
 
 ## Tests and troubleshooting
 

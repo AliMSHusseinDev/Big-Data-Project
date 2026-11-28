@@ -55,7 +55,7 @@ def command(action, expected_session, expected_status, settings=None):
                 json.dumps(empty_day(now)),
             )
             db.execute(
-                "UPDATE SimulationControl SET session_id=?,demo_requested=0,revision=revision+1 WHERE id=1",
+                "UPDATE SimulationControl SET session_id=?,demo_requested=1,revision=revision+1 WHERE id=1",
                 session,
             )
         elif action == "Invalid demo" and status == "Running":

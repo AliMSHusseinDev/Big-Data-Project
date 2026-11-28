@@ -53,13 +53,13 @@ A uniform draw between 20 and 40 simulated seconds has a mean of 30, or about 12
 
 **place_order(day, session, now, rng)** samples the order size, station and menu independently for each item. The order ID stays the same for its siblings. The function enqueues each item and returns its PLACED event. Supplying a seeded random generator makes a test reproducible.
 
-**serve_stations(day, session, now, scenario, rng)** removes due jobs, emits READY events, then moves waiting items into the available positions. Each new job stores the item and its due time. A delay adds the station SLA to selected drink and grill jobs. Completion and taking the next item may share a timestamp.
+**serve_stations(day, session, now, scenario, rng)** removes due jobs, emits READY events, then moves waiting items into the available positions. Each new job stores the item and its due time. A selected item needs one remake and holds its station for a second draw from the same prep range. Its chance is 3% under Low Traffic, 6% under Normal Traffic, 10% under Rush Hour and 20% under Kitchen Delay. Spark uses the actual elapsed time for the alert. Completion and taking the next item may share a timestamp.
 
 **advance(day, session, status, elapsed, speed, scenario, factor, rng)** mutates the saved kitchen and returns messages in simulated time order. Its target is previous virtual time plus elapsed real time times speed. The loop jumps to the next clock, completion or arrival. Closing omits arrival times. When queues and jobs empty, it emits FINAL once and freezes the time. Paused calls return immediately.
 
 {{source simulator/kitchen.py}}
 
-**command(action, expected_session, expected_status, settings)** acquires an update lock on the singleton control row. A stale browser click fails the comparison. Settings validate the speed, mode and arrival factor. Start creates a fresh UUID and noon opening time. A subsequent opening falls on a later calendar day than the previous close. End changes the state to Closing, including from Paused. It returns a Boolean for the UI. Changing state or settings increments a revision so a polling interval spanning a command cannot be charged at the wrong speed.
+**command(action, expected_session, expected_status, settings)** acquires an update lock on the singleton control row. A stale browser click fails the comparison. Settings validate the speed, mode and arrival factor. Start creates a fresh UUID and noon opening time and requests one separate invalid example. A subsequent opening falls on a later calendar day than the previous close. End changes the state to Closing, including from Paused. It returns a Boolean for the UI. Changing state or settings increments a revision so a polling interval spanning a command cannot be charged at the wrong speed.
 
 {{source simulator/control.py}}
 
@@ -153,7 +153,7 @@ The record reader applies an Avro record schema to the JSON. Four fields are req
 
 ## Normalization walk-through
 
-The wire test sends item_name `" cola "`, category `" drinks "`, station_id `" drinks "`, event_type `"placed"`, SLA `"75"` and an offset timestamp. The output values verified by the test are Cola, Drinks, DRINKS, PLACED and JSON number 75. OffsetDateTime parses the offset and toInstant emits UTC. The IDs are preserved. A separate malformed message produces JSON with its original text and an error reason.
+The wire test sends item_name `" cola "`, category `" drinks "`, station_id `" drinks "`, event_type `"placed"`, SLA `"75"` and an offset timestamp. The output values verified by the test are Cola, Drinks, DRINKS, PLACED and JSON number 75. OffsetDateTime parses the offset and toInstant emits UTC. The IDs are preserved. A malformed message and the opening demo each produce JSON with the original text and an error reason. Published headers include the source offset from partition 0 of kitchen.raw.
 
 The Groovy callback receives input and output streams for one FlowFile. **field** checks non-empty strings and size limits. **number** checks decimal digits, positivity and range. The menu lookup verifies the station, category, spelling and SLA together. The result object contains only fields intended for the cleaned schema. The message.key attribute follows the FlowFile to the publisher. An invalid demo never shares a valid item's lifecycle ID.
 
@@ -192,7 +192,7 @@ The production application runs one Structured Streaming query. Its Kafka source
 
 ## Split dataset and narrow versus wide transformations
 
-The primary source continuously generates orders. The repository also includes a reproducible raw dataset from that simulator. With seed 42 and a fixed UTC opening, dataset/generate.py records four simulated minutes of arrivals and drains the kitchen. The first file contains the first two minutes inclusive, the second contains subsequent activity through FINAL. Read part-1.jsonl then part-2.jsonl for event order. These chronological chunks can split an item's lifecycle between files. They contain 48 and 109 unique events respectively, covering eight orders and 17 items. No model is trained and no train/test split is assumed.
+The primary source continuously generates orders. The repository also includes a reproducible raw dataset from that simulator. With seed 42 and a fixed UTC opening, dataset/generate.py records four simulated minutes of arrivals and drains the kitchen. The first file contains the first two minutes inclusive, the second contains subsequent activity through FINAL. Read part-1.jsonl then part-2.jsonl for event order. These chronological chunks can split an item's lifecycle between files. They contain 54 and 108 unique events respectively, covering eight orders and 20 items. No model is trained and no train/test split is assumed.
 
 In the live Spark job, select/from_json, where and row-wise withColumn are **narrow** transformations. Each output row uses data from its own input partition. groupBy followed by agg for category averages and station counts is **wide** when groups span partitions. Spark shuffles partial results by grouping key before final aggregation. A Kafka partition, a dataset file, and a Spark execution partition have different roles.
 
@@ -309,19 +309,21 @@ SELECT session_id,COUNT(*) AS unique_events FROM ProcessedEvents GROUP BY sessio
 
 ## Navigation and display
 
-The sidebar selects eight workspaces. Overview combines controls, order and item KPIs, workload and recent activity. Live Orders filters item rows by session, order text, station, category and status. Kitchen Stations shows waiting, preparation, completed work and utilization against the configured capacity. Analytics draws category performance, queue/workload, service-hour demand and sampled history. SLA Alerts filters Spark's Active and Resolved rows. Simulation Control submits guarded commands. Data Pipeline Monitor probes services and compares matching Kafka records. End-of-Day Analysis selects completed days and displays the service window, totals, peak queues, busiest station and SLA percentage.
+The sidebar selects eight workspaces. Overview shows order and item counts, station workload, total, active and resolved violations, and how many orders contain a late item. Live Orders filters item rows by session, order text, station, category and status. Kitchen Stations shows waiting, preparation, completed work and utilization against the configured capacity. Analytics draws category performance, queue/workload and sampled queue lengths in waiting menu items. SLA Alerts filters Spark's Active and Resolved rows. Simulation Control submits guarded commands. Data Pipeline Monitor probes services and compares matching Kafka records. End-of-Day Analysis selects completed days and displays the service window, totals, peak queues, busiest station and SLA percentage.
 
 **read(sql, *params)** fetches rows with bound parameters, preserves cursor column names even for an empty result, and returns a pandas DataFrame. **control_state()** reads the singleton and joins the active session, defaulting to Ready. **day_data(session)** loads the six result tables for that day. **with_times(frame)** copies the frame and converts selected epoch-second fields for UTC display.
 
 {{source dashboard/data.py}}
 
-**act** submits the user's command with its expected state and reruns the UI. **controls** chooses the primary action, disables invalid transitions and groups scenario, speed and arrival multiplier in an explicit Apply form. **chart** converts a non-empty result frame into a Plotly chart. **stations** joins capacities and derives utilization and load labels. **metrics** counts distinct order rows separately from item rows and computes display summaries from persisted Spark output. **order_table** applies the text and multi-select filters and styles lifecycle statuses. **analytics** plots aggregated category/station frames, groups orders into simulated hour bins and sorts the history line by time. **alerts** joins Spark alerts to item details. **render** selects the active or historical day and draws the selected workspace. **refresh** refreshes the fragment every four real seconds and reports a database outage. Opening or closing a browser executes none of the simulator's scheduling loop.
+**act** submits the user's command with its expected state and reruns the UI. **controls** chooses the primary action, disables invalid transitions and groups scenario, speed and arrival multiplier in an explicit Apply form. **chart** converts a non-empty result frame into a Plotly chart. **stations** joins capacities and derives utilization and load labels. **metrics** counts distinct order rows separately from item rows and computes display summaries from persisted Spark output. **order_table** applies the text and multi-select filters and styles lifecycle statuses. **analytics** plots aggregated category/station frames, and sorts the history line by time. End-of-Day Analysis reports the busiest arrival hour or hours in text. **alerts** joins Spark alerts to item details. **render** selects the active or historical day and draws the selected workspace. **refresh** refreshes the fragment every four real seconds and reports a database outage. Opening or closing a browser executes none of the simulator's scheduling loop.
 
 {{source dashboard/app.py}}
 
-**fetch** reads JSON from Compose addresses. **samples** assigns a partition, reads its earliest and end offsets, and seeks near the end without committing. **monitor** checks the database and worker heartbeat, counts running NiFi processors, checks the Spark application and samples Kafka. It matches raw and clean business events by event_id. The generated and persisted counts are per session and include control events. Estimated counts derived from offsets would be misleading when retention or replay occurs.
+**fetch** reads JSON from Compose addresses. **samples** assigns a partition, reads its earliest and end offsets, and seeks near the end without committing. **monitor** checks the database and worker heartbeat, counts running NiFi processors, checks the Spark application and samples Kafka. It matches a recent raw event with its cleaned value and shows the latest reject. On request it compares retained raw, cleaned and invalid messages for the chosen date by event ID and raw offset. For older outputs it compares by ID alone. A payload fingerprint identifies an input with no ID. The generated and persisted counts are per session and include control events. Estimated counts derived from offsets would be misleading when retention or replay occurs.
 
 {{source dashboard/monitor.py}}
+
+{{source dashboard/routing.py}}
 
 ## Service orchestration and startup
 

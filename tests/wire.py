@@ -4,6 +4,8 @@ import json
 import time
 import uuid
 from kafka import KafkaConsumer, KafkaProducer, TopicPartition
+from dashboard.routing import check_routes
+from simulator.worker import invalid_demo
 
 if __name__ == "__main__":
     session = str(uuid.uuid4())
@@ -17,7 +19,7 @@ if __name__ == "__main__":
         station_id=" drinks ",
         sla_seconds="75",
     )
-    producer = KafkaProducer(bootstrap_servers="kafka:29092", acks="all")
+    producer = KafkaProducer(bootstrap_servers="kafka:29092", acks="all", enable_idempotence=True)
     consumer = KafkaConsumer(bootstrap_servers="kafka:29092", group_id=None, enable_auto_commit=False)
     parts = [TopicPartition("kitchen." + name, 0) for name in ("cleaned", "invalid")]
     consumer.assign(parts)
@@ -46,6 +48,7 @@ if __name__ == "__main__":
                 )
             ).encode()
         )
+    offsets = set()
     for payload in [
         messages[0],
         messages[1],
@@ -54,8 +57,10 @@ if __name__ == "__main__":
         messages[2],
         messages[4],
         (session + "{bad-json").encode(),
+        json.dumps(invalid_demo(session)).encode(),
     ]:
-        producer.send("kitchen.raw", key=item["item_id"].encode(), value=payload).get(timeout=15)
+        sent = producer.send("kitchen.raw", key=item["item_id"].encode(), value=payload).get(timeout=15)
+        offsets.add(sent.offset)
     results = {"cleaned": [], "invalid": []}
     deadline = time.monotonic() + 100
     while time.monotonic() < deadline:
@@ -63,13 +68,16 @@ if __name__ == "__main__":
             for message in records:
                 if session.encode() not in message.value:
                     continue
+                offsets.remove(int(dict(message.headers)["kafka.offset"]))
                 record = json.loads(message.value)
                 if partition.topic == "kitchen.cleaned":
                     # The publisher takes the Kafka key from NiFi's message.key attribute.
                     assert message.key.decode() == (record.get("item_id") or session)
                 results[partition.topic.split(".")[1]].append(record)
-        if len(results["cleaned"]) >= 6 and results["invalid"]:
+        if len(results["cleaned"]) >= 6 and len(results["invalid"]) >= 2:
             break
+    assert not offsets, offsets
+    assert check_routes(consumer, session) == ([8, 6, 2], [])
     producer.close()
     consumer.close()
     assert {r["event_type"] for r in results["cleaned"] if not r.get("item_id")} == {"CLOCK", "FINAL"}
@@ -83,7 +91,8 @@ if __name__ == "__main__":
     ), results
     assert {r["event_type"] for r in clean} == {"PLACED", "PREPARING", "READY"}
     assert len({r["event_id"] for r in clean}) == 3
-    assert results["invalid"][0]["reason"] and session in results["invalid"][0]["original"]
+    assert all(r["reason"] and session in r["original"] for r in results["invalid"])
+    assert any(r["reason"] == "Unknown event_type" for r in results["invalid"])
     print(
-        "PASS: four normalized messages, two control messages, three unique lifecycle IDs, malformed payload and reason preserved."
+        "PASS: 8 raw = 6 cleaned + 2 rejected. All 8 raw offsets matched once, including the replay and opening demo."
     )

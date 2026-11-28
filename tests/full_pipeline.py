@@ -64,6 +64,18 @@ if __name__ == "__main__":
             cards = {metric.label: metric.value for metric in app.metric}
             assert int(cards["Orders"]) == len(data["Orders"])
             assert int(cards["Completed items"]) == len(data["OrderItems"])
+            assert (
+                int(cards["Total SLA violations"])
+                == int(cards["Resolved alerts"])
+                == len(data["SLAAlerts"])
+            )
+            assert int(cards["Active alerts"]) == 0
+        if page == "Data Pipeline Monitor":
+            compare = next(b for b in app.button if b.label == "Compare retained messages for this day")
+            compare.click().run()
+            assert not app.warning and app.success
+            _, _, (raw, cleaned, invalid), differences = app.session_state["route_check"]
+            assert raw == cleaned + invalid and cleaned >= count and invalid >= 2 and not differences
     press("Start")
     next_day = control_state()
     assert next_day.session_id != session

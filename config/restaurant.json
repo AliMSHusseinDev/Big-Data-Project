@@ -17,6 +17,12 @@
       40
     ]
   },
+  "remake_percent": {
+    "Low Traffic": 3,
+    "Normal Traffic": 6,
+    "Rush Hour": 10,
+    "Kitchen Delay": 20
+  },
   "stations": [
     {
       "id": "GRILL",

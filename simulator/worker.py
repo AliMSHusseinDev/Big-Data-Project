@@ -1,8 +1,18 @@
 import json
 import time
+import uuid
 from kafka import KafkaProducer
 from database.connection import connect
 from simulator.kitchen import advance
+
+
+def invalid_demo(session):
+    return {
+        "event_id": str(uuid.uuid4()),
+        "session_id": session,
+        "event_type": "BROKEN",
+        "example": "NiFi rejection demo",
+    }
 
 
 def tick(previous, previous_revision):
@@ -32,9 +42,7 @@ def tick(previous, previous_revision):
                 control.arrival_factor,
             )
             if control.demo_requested:
-                pending.append(
-                    {"session_id": session, "event_type": "BROKEN", "example": "isolated invalid demo"}
-                )
+                pending.append(invalid_demo(session))
                 db.execute("UPDATE SimulationControl SET demo_requested=0 WHERE id=1")
             db.execute(
                 """UPDATE SimulationSessions SET kitchen=?,pending=?,sim_time=?,generated=?,expected_events=?
@@ -53,6 +61,7 @@ def run():
     producer = KafkaProducer(
         bootstrap_servers="kafka:29092",
         acks="all",
+        enable_idempotence=True,
         max_in_flight_requests_per_connection=1,
         key_serializer=str.encode,
         value_serializer=lambda value: json.dumps(value).encode(),

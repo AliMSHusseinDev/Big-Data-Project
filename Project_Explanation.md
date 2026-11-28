@@ -92,9 +92,11 @@ The worker loads `config/restaurant.json` when it imports the kitchen module. Pr
 | `tick()` | Reads SQL controls, advances the saved kitchen and saves new events as pending in the same transaction. |
 | `run()` | Polls the kitchen, sends pending events to Kafka and clears the list after Kafka acknowledges them. |
 
-**Arrivals and time.** At the default arrival multiplier of 1, Low Traffic draws an interval of 40–80 simulated seconds, Normal Traffic 20–40, and Rush Hour 10–20. Kitchen Delay uses 20–40 and adds one SLA's worth of cooking time to new grill and drinks jobs. The arrival multiplier changes the gap before the next customer. Speed changes the whole clock: at 10×, one real minute advances ten kitchen minutes.
+**Arrivals and time.** At the default arrival multiplier of 1, Low Traffic draws an interval of 40–80 simulated seconds, Normal Traffic 20–40, and Rush Hour 10–20. Kitchen Delay also uses 20–40. Each item has a chance of needing a remake while it still holds its cooking position. The chance is 3% in Low Traffic, 6% in Normal Traffic, 10% in Rush Hour and 20% in Kitchen Delay. A remake adds another draw from the same station’s preparation range. Spark raises an alert only when the actual time goes over the SLA. The arrival multiplier changes the gap before the next customer. Speed changes the whole clock: at 10×, one real minute advances ten kitchen minutes.
 
 **Messages.** A pizza and a burger on one order produce two PLACED events, two PREPARING events and two READY events. Either dish may finish first. A separate CLOCK event every five simulated seconds lets Spark see time pass while food cooks. FINAL marks the end of a drained day. Neither control event counts as an item.
+
+Each new day also sends a separate `BROKEN` example with its own ID. NiFi rejects it and saves the reason. It has no item or order and adds zero to the expected valid-event count.
 
 Saving pending events before sending protects against a worker crash. If Kafka receives an event just before the worker stops, the worker may send that same ID again. Section 9 explains how Spark handles it.
 
@@ -122,7 +124,7 @@ producer.send("kitchen.raw", key=key, value=record).get(timeout=30)
 **One record example.** The CLOCK at noon in `dataset/part-1.jsonl` has the session UUID as its key. Its complete JSON value is:
 
 ```json
-{"event_id": "30873bbe-05e5-44be-b457-23e65d02d001-E3", "session_id": "30873bbe-05e5-44be-b457-23e65d02d001", "event_type": "CLOCK", "event_time": "2026-01-01T12:00:00+00:00"}
+{"event_id": "6f3e172f-b405-4d37-b44b-9ad1c38c074d-E3", "session_id": "6f3e172f-b405-4d37-b44b-9ad1c38c074d", "event_type": "CLOCK", "event_time": "2026-01-01T12:00:00+00:00"}
 ```
 
 **Where does a reader start?** With a usable saved group offset, NiFi continues there. If none is usable, `earliest` starts at the oldest available record, `latest` starts at the end, and `none` reports an error. NiFi is set to `earliest`.
@@ -188,7 +190,7 @@ ValidateRecord also writes content. A general NiFi flow can use UpdateAttribute 
 
 NiFi now acts as a producer. The same broker stores two new streams. **kitchen.cleaned** gives Spark a stable format and a place to resume reading. **kitchen.invalid** keeps rejected data available for inspection without feeding it to the analytics.
 
-A script rejection contains the original text and a reason. A validation failure follows its own failure path; the content and available error attribute depend on where it failed. In Kafka UI, compare a raw and a clean event by `event_id`. Spark subscribes only to the cleaned topic.
+A script rejection contains the original text and a reason. A validation failure follows its own failure path; the content and available error attribute depend on where it failed. Both publishers attach the raw offset as a `kafka.offset` header. In Kafka UI, use it to find the input in partition 0 of kitchen.raw. In Data Pipeline Monitor, compare the retained records for one day. After NiFi catches up, each input should have one clean or rejected output. The comparison uses event IDs alone for older outputs that lack the source offset, and a payload fingerprint for messages without an ID. Spark subscribes only to the cleaned topic.
 
 ## 9. Apache Spark: Streaming and Analytics
 
@@ -261,14 +263,14 @@ Spark calculates the three required measures. SQL Server stores them. Streamlit 
 
 | Page | What to look for |
 |---|---|
-| Overview | Simulation controls, order and item counts, average prep, active alerts, station workload and recent activity. |
+| Overview | Simulation controls, order and item counts, average prep, total, active and resolved SLA violations, the share of orders with a late item, station workload and recent activity. |
 | Live Orders | Individual items, lifecycle times and SLA status. Filter by session, order, station, category or status. |
 | Kitchen Stations | Waiting and cooking counts, completed items, capacity and percent of positions in use. |
-| Analytics | Prep by category, queues, workload, orders by simulated hour, violations and sampled queue trends. |
+| Analytics | Prep by category, queues, workload, violations and sampled queue trends. A queue value of two means two menu items waiting at that station. |
 | SLA Alerts | Active and Resolved rows joined to item details. Filter by alert state and inspect the delay. |
 | Simulation Control | Start, pause, resume or end a day. Apply speed and traffic settings or send an isolated invalid demo record. |
-| Data Pipeline Monitor | Worker heartbeat, service checks, topic offsets and recent raw/clean records matched by event ID when available. An offset is a log position; a replay can add another message for one event. |
-| End-of-Day Analysis | Choose a completed session. Review its service window, average wait and prep, SLA percentage, busiest station and observed peak queues. |
+| Data Pipeline Monitor | Worker heartbeat, service checks, topic offsets and a raw/clean sample. Inspect the latest rejection and compare inputs with both outputs for the selected business date. An offset is a log position; a replay can add another message for one event. |
+| End-of-Day Analysis | Choose a completed session by its opening date, such as November 28, 2026. Review its service window, average wait and prep, SLA percentage, busiest station and observed peak queues. |
 
 ## 12. Simulation Controls
 
@@ -306,11 +308,11 @@ Each click includes the session and state that the browser last saw. The databas
 
 ## 14. Complete End-to-End Example
 
-Imagine one customer orders a Classic Burger and French Fries during Kitchen Delay. Both stations have room. The times below illustrate the configured rules. Other customers can arrive while this order cooks.
+Imagine one customer orders a Classic Burger and French Fries during Kitchen Delay. Both stations have room. In this example the burger needs one remake. The times below illustrate the configured rules. Other customers can arrive while this order cooks.
 
 | Kitchen time | Follow this order |
 |---|---|
-| 12:00:00 | Python creates one order ID and two item IDs. Two PLACED events enter `kitchen.raw`. The payloads carry menu fields such as `"item_name": " classic burger "` and `"item_name": " french fries "`, as seen in the sample files. |
+| 12:00:00 | Python creates one order ID and two item IDs. Two PLACED events enter `kitchen.raw`. The payloads carry menu fields such as `"item_name": " classic burger "` and `"item_name": " french fries "`, before NiFi cleans the text. |
 | 12:00:00 | Each station takes its item and sends PREPARING. NiFi cleans and validates every event, then publishes to `kitchen.cleaned`. Spark combines the steps by item ID. These two items now add zero to the waiting lines and one to each station's preparing count. |
 | 12:02:00 | Fries reach READY. Spark calculates 120 seconds of prep, within the fryer's 240-second SLA. The order stays open because only one of two items is ready. |
 | 12:06:05 | A CLOCK shows that the burger has cooked for 365 seconds. Its SLA is 360. Spark can report an Active alert with **5 seconds of delay** when that batch is processed. |
@@ -335,4 +337,4 @@ Imagine one customer orders a Classic Burger and French Fries during Kitchen Del
 - **Why keep the event log and the checkpoint?** The log tells Spark what happened to each dish. The checkpoint tells it how far it has read from Kafka.
 - **Why can the kitchen be empty while the day is still Closing?** The last events may still be in Kafka, in NiFi queues or in a Spark batch. Completed requires the saved results to catch up.
 
-**What was verified?** The recorded Linux test sent both sample files through Kafka and NiFi. Spark recovered **157 unique events, eight completed orders and 17 ready items**. The test report also records a backpressure test and Spark checkpoint recovery. Live acceptance of the SQL-backed sink, full dashboard results and the Windows launcher remains open. See [the project test report](docs/Test_Report.md).
+**What was verified?** The recorded Linux test sent both sample files through Kafka and NiFi. For the updated dataset Spark recovered **162 unique events, eight completed orders, 20 ready items and two resolved violations**. The test report also records a backpressure test and Spark checkpoint recovery. Live acceptance of the SQL-backed sink, full dashboard results and the Windows launcher remains open. See [the project test report](docs/Test_Report.md).

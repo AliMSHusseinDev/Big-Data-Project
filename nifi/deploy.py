@@ -147,7 +147,13 @@ def deploy():
             "org.apache.nifi.kafka.processors.PublishKafka",
             0,
             800,
-            dict(publish, **{"Topic Name": "kitchen.cleaned"}),
+            dict(
+                publish,
+                **{
+                    "Topic Name": "kitchen.cleaned",
+                    "FlowFile Attribute Header Pattern": r"kafka\.offset",
+                },
+            ),
             ["success"],
         ),
         (
@@ -159,7 +165,7 @@ def deploy():
                 publish,
                 **{
                     "Topic Name": "kitchen.invalid",
-                    "FlowFile Attribute Header Pattern": "record.error.message",
+                    "FlowFile Attribute Header Pattern": r"kafka\.offset|record\.error\.message",
                 },
             ),
             ["success"],

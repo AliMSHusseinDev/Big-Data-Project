@@ -59,9 +59,12 @@ def controls(state):
                 act("Settings", state, (scenario, speed, rate))
         if st.button("Send invalid demo record", disabled=state.status != "Running"):
             act("Invalid demo", state)
+        st.caption(
+            "Each new day sends one separate test record. Open Data Pipeline Monitor to see why NiFi rejected it."
+        )
 
 
-def chart(frame, kind, x, y, title, color=None):
+def chart(frame, kind, x, y, title, color=None, labels=None):
     if frame.empty:
         return
     figure = kind(
@@ -70,9 +73,15 @@ def chart(frame, kind, x, y, title, color=None):
         y=y,
         color=color,
         title=title,
+        labels=labels,
         color_discrete_sequence=["#63C6AD", "#F4A261", "#82A9D1", "#D98FA1", "#C2B88C"],
     )
     figure.update_layout(margin=dict(l=4, r=8, t=48, b=6), height=305)
+    if y == "waiting":
+        peak = int(frame[y].max())
+        figure.update_yaxes(range=[0, max(1, peak) * 1.08], dtick=max(1, (peak + 5) // 6))
+        if kind == px.line:
+            figure.update_traces(mode="lines+markers", line_shape="hv")
     st.plotly_chart(figure, use_container_width=True)
 
 
@@ -94,20 +103,29 @@ def stations(metrics):
 def metrics(data):
     orders, items = data["Orders"], data["OrderItems"]
     done = items[items.status == "READY"]
+    alerts = data["SLAAlerts"]
     cards = [
         ("Orders", len(orders)),
         ("Completed orders", (orders.status == "READY").sum()),
+        ("Menu items", len(items)),
         ("Waiting", (items.status == "PLACED").sum()),
         ("Preparing", (items.status == "PREPARING").sum()),
         ("Completed items", len(done)),
         ("Avg prep · sec", round(done.prep_seconds.mean()) if done.prep_seconds.count() else "—"),
-        ("Active alerts", (data["SLAAlerts"].status == "Active").sum()),
-        ("Menu items", len(items)),
+        ("Total SLA violations", len(alerts)),
+        ("Active alerts", (alerts.status == "Active").sum()),
+        ("Resolved alerts", (alerts.status == "Resolved").sum()),
     ]
     for i, (name, value) in enumerate(cards):
-        if i % 4 == 0:
-            cols = st.columns(4)
-        cols[i % 4].metric(name, value, border=True)
+        if i % 5 == 0:
+            cols = st.columns(5)
+        cols[i % 5].metric(name, value, border=True)
+    if len(orders):
+        affected = items.loc[items.item_id.isin(alerts.item_id), "order_id"].nunique()
+        st.caption(
+            f"{affected} of {len(orders)} orders have at least one late item ({affected / len(orders):.1%}). "
+            "Each late item counts as one SLA violation."
+        )
 
 
 def order_table(items):
@@ -131,16 +149,36 @@ def order_table(items):
 
 def analytics(data, station):
     category = data["CategoryMetrics"]
-    orders = with_times(data["Orders"]).dropna(subset=["placed_at"])
-    hourly = orders.groupby(orders.placed_at.dt.floor("h")).size().reset_index(name="orders")
     chart(category, px.bar, "category", "avg_prep", "Average completed prep · seconds")
-    chart(station, px.bar, "station", "waiting", "Waiting by station")
+    chart(
+        station,
+        px.bar,
+        "station",
+        "waiting",
+        "Waiting by station",
+        labels={"station": "Kitchen station", "waiting": "Menu items waiting"},
+    )
     chart(station, px.bar, "station", "preparing", "Current preparation workload")
-    chart(hourly, px.bar, "placed_at", "orders", "Customer orders by simulated hour")
     chart(category, px.bar, "category", "violations", "SLA violations by category")
     chart(category, px.bar, "category", "completed", "Completed items by category")
     history = with_times(data["MetricHistory"]).sort_values("sample_time")
-    chart(history, px.line, "sample_time", "waiting", "Observed queue length over time", "station_id")
+    chart(
+        history,
+        px.line,
+        "sample_time",
+        "waiting",
+        "Observed queue length over time",
+        "station_id",
+        labels={
+            "sample_time": "Simulated time (UTC)",
+            "waiting": "Menu items waiting",
+            "station_id": "Kitchen station",
+        },
+    )
+    if not history.empty:
+        st.caption(
+            "Each point counts menu items waiting to start preparation at that station. A value of 2 means two items in line."
+        )
 
 
 def alerts(data):
@@ -163,9 +201,6 @@ def render():
     st.caption(f"{state.status}   ·   {clock}   ·   {state.scenario}   ·   {state.speed}×")
     if page in ("Simulation Control", "Overview"):
         controls(state)
-    if page == "Data Pipeline Monitor":
-        monitor(state)
-        return
     if page == "Simulation Control":
         return
     sessions = read(
@@ -174,20 +209,40 @@ def render():
     if page == "End-of-Day Analysis":
         sessions = sessions[sessions.status == "Completed"]
     if sessions.empty:
+        if page == "Data Pipeline Monitor":
+            monitor(None)
+            return
         st.info(
             "End-of-day results appear after Spark confirms completion."
             if page == "End-of-Day Analysis"
             else "Start a simulation to see kitchen activity."
         )
         return
-    if page in ("End-of-Day Analysis", "Live Orders", "Analytics", "SLA Alerts"):
+    dates = pd.to_datetime(sessions.opened_at, unit="s", utc=True)
+    labels = {key: f"{date:%B} {date.day}, {date.year}" for key, date in zip(sessions.session_id, dates)}
+    if page in (
+        "End-of-Day Analysis",
+        "Live Orders",
+        "Analytics",
+        "SLA Alerts",
+        "Data Pipeline Monitor",
+    ):
         ids = sessions.session_id.tolist()
         session = st.selectbox(
-            "Business day", ids, index=ids.index(state.session_id) if state.session_id in ids else 0
+            "Business day",
+            ids,
+            index=ids.index(state.session_id) if state.session_id in ids else 0,
+            format_func=labels.__getitem__,
         )
     else:
         session = state.session_id
-        st.caption(f"Business day {session}")
+        if session not in labels:
+            st.info("Start a simulation to see kitchen activity.")
+            return
+        st.caption(f"Business day · {labels[session]}")
+    if page == "Data Pipeline Monitor":
+        monitor(session)
+        return
     data = day_data(session)
     station = stations(data["StationMetrics"])
     if page == "Overview":
@@ -195,7 +250,9 @@ def render():
         chart(station, px.bar, "station", "preparing", "Station workload")
         st.subheader("Recent orders")
         st.dataframe(
-            with_times(data["Orders"]).sort_values("placed_at", ascending=False).head(10),
+            with_times(data["Orders"].drop(columns="session_id"))
+            .sort_values("placed_at", ascending=False)
+            .head(10),
             hide_index=True,
         )
         st.subheader("Recent alerts")
@@ -226,6 +283,12 @@ def render():
         busiest = station.loc[station.completed.idxmax(), "station"] if len(items) else "—"
         wait = items.wait_seconds.mean()
         st.write(f"Busiest by completed items · {busiest}")
+        hours = with_times(data["Orders"]).placed_at.dropna().dt.floor("h").value_counts()
+        if not hours.empty:
+            peaks = ", ".join(
+                t.strftime("%H:%M") for t in hours[hours == hours.max()].index.sort_values()
+            )
+            st.write(f"Peak arrival hours (UTC) · {peaks} · {hours.max()} orders per peak hour")
         st.write(f"SLA violations · {total} ({100 * total / max(1, len(items)):.1f}% of items)")
         st.write(
             f"Average wait · {wait:.1f} simulated seconds" if pd.notna(wait) else "Average wait · —"

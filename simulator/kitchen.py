@@ -76,8 +76,9 @@ def serve_stations(day, session, now, scenario, rng):
         while queue and busy < station["capacity"]:
             item = queue.pop(0)
             duration = rng.randint(*station["prep_seconds"])
-            if scenario == "Kitchen Delay" and key in ("GRILL", "DRINKS"):
-                duration += station["sla_seconds"]
+            # A remake occupies the same station for one more preparation.
+            if rng.randrange(100) < CONFIG["remake_percent"][scenario]:
+                duration += rng.randint(*station["prep_seconds"])
             day["cooking"].append(dict(item=item, due=now + duration))
             records.append(event(day, session, "PREPARING", now, item))
             busy += 1

@@ -1,5 +1,24 @@
 # Verification report
 
+## Simulation balance and routing checked on 28 November 2026
+
+The simulator ran 20 seeded business days per scenario, each with exactly 128 orders. All queues drained. A late item took longer than its station SLA from PREPARING to READY. An affected order contained at least one late item.
+
+| Scenario | Late items / total items | Orders with a late item / total orders |
+|---|---:|---:|
+| Low Traffic | 212 / 7,695 (2.8%) | 203 / 2,560 (7.9%) |
+| Normal Traffic | 390 / 7,632 (5.1%) | 358 / 2,560 (14.0%) |
+| Rush Hour | 687 / 7,652 (9.0%) | 617 / 2,560 (24.1%) |
+| Kitchen Delay | 1,322 / 7,726 (17.1%) | 1,052 / 2,560 (41.1%) |
+
+These are observations from seeds 0–19. New days draw their own service times. The four simulator tests and both Spark analytics tests passed, including a threshold-equality case and active and resolved alerts.
+
+- **Kafka and NiFi** routed 8 test messages to 6 cleaned and 2 invalid outputs. Each output carried the correct raw offset, including the repeated lifecycle event. Malformed JSON and the simulator’s separate BROKEN example kept their rejection reasons. The day comparison matched all eight inputs. Two routing regression tests also caught an extra cleaned copy in an older day and a duplicated raw offset paired with a missing offset despite equal topic totals.
+- **Updated split dataset** included 54 and 108 valid events. Both parts plus one rejection example went through the live broker and NiFi. The comparison showed 163 raw, 162 cleaned and 1 invalid. Spark Structured Streaming read the 162 event IDs, and its reports produced 8 completed orders, 20 ready items and 2 resolved violations.
+- **Dashboard** was exercised with Streamlit AppTest, fixture database rows and a live Kafka connection. The checks covered the business-date labels, selecting a historical session, total/active/resolved cards, the queue chart units and ticks, removal of the hourly orders chart, and the routing comparison.
+- **Opening controls** in a SQLite test adapter exercised the real command and worker tick functions. Opening requested one rejected example, pending replay kept its ID, the next tick did not add another, and a manual request produced a new ID. The valid event count excluded the sample.
+- **Full SQL and Windows acceptance** remain open. Two pulls of the pinned SQL Server image returned Forbidden on this Linux host. The dashboard fixture test did not exercise SQL Server or the Windows launcher. The Windows checks below use the real JDBC sink and SQL-backed dashboard.
+
 ## Course requirements checked on 27 November 2026
 
 | Requirement | Evidence from the upgraded Linux stack |
@@ -59,6 +78,7 @@ wire up -d flow
 wire wait flow
 wire run --rm --no-deps flow
 wire run --rm --no-deps dashboard python -m tests.wire
+wire run --rm --no-deps dashboard python -m unittest discover -s tests -p test_routing.py -v
 wire stop kafka nifi
 wire up -d flow
 wire wait flow
